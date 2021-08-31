@@ -22,7 +22,6 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-#include "math.h"
 #include <stdlib.h>
 /* USER CODE END Includes */
 
@@ -70,8 +69,9 @@ void Passo3(void);
 void Passo4(void);
 void motor_direita(uint16_t passo);
 void motor_esquerda(uint16_t passo);
+void mudar_velocidade_motor(void);
 void uart_send_variable(uint16_t value);
-char* itoa(int num, char* buffer, int base);
+void MENU(void);	// <--Implementar menu para alterar angulos minimo, maximo e a velocidade.
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
@@ -119,16 +119,17 @@ int main(void)
   HAL_GPIO_WritePin(M1A_GPIO_Port, M1A_Pin, GPIO_PIN_RESET);
   HAL_GPIO_WritePin(M1B_GPIO_Port, M1B_Pin, GPIO_PIN_RESET);
   HAL_GPIO_WritePin(PWM_GPIO_Port, PWM_Pin, GPIO_PIN_SET);
-  MX_USART1_UART_Init();
   NVIC_SetPriority(USART1_IRQn, 1);// prioridade maior
   HAL_ADC_Start(&hadc);
   HAL_UART_Transmit(&huart1, (uint8_t *)"ADC STARTED\r\n", sizeof("ADC STARTED\r\n"), 100);
-  MX_TIM3_Init();
   HAL_TIM_Base_Start_IT(&htim3);
   NVIC_SetPriority(TIM3_IRQn, 3); //prioridade menor
   HAL_UART_Transmit(&huart1, (uint8_t *)"Timer STARTED\r\n", sizeof("Timer STARTED\r\n"), 100);
   HAL_UART_Receive_IT(&huart1, UART_buffer, 1);
   HAL_UART_Transmit(&huart1, (uint8_t *)"UART receive interrupt STARTED\r\n", sizeof("UART receive interrupt STARTED\r\n"), 100);
+  HAL_UART_Transmit(&huart1, (uint8_t *)"speed: ", sizeof("speed: "), 100);
+  uart_send_variable((int)prescal);
+  HAL_UART_Transmit(&huart1, (uint8_t *)"\r\n", sizeof("\r\n"), 100);
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -146,26 +147,20 @@ int main(void)
   }
   while (1)
   {
-	  //se desloca do angulo minimo para o angulo maximo
-	  if (adc_angulo <= min_ang){
-		  do{
-			  motor_direita(int_flag);
-			  adc_angulo = HAL_ADC_GetValue(&hadc);
-		  }while(adc_angulo <= max_ang);
-	  }
-	  //se desloca do angulo minimo para o angulo maximo
-	  else if(adc_angulo >= max_ang){
-		  do{
-			  motor_esquerda(int_flag);
-			  adc_angulo = HAL_ADC_GetValue(&hadc);
-		  }while(adc_angulo >= min_ang);
-	  }
-	  //muda a velocidade do motor
-
-	  __HAL_TIM_SET_PRESCALER(&htim3,prescal); // ajustar prescaller do timer para alterar a velocidade
-	  HAL_UART_Transmit(&huart1, (uint8_t *)"speed: ", sizeof("speed: "), 100);
-	  uart_send_variable((uint8_t)prescal);
-	  HAL_UART_Transmit(&huart1, (uint8_t *)"\r\n", sizeof("\r\n"), 100);
+	//se desloca do angulo minimo para o angulo maximo
+	if (adc_angulo <= min_ang){
+	  do{
+		  motor_direita(int_flag);
+		  adc_angulo = HAL_ADC_GetValue(&hadc);
+	  }while(adc_angulo <= max_ang);
+	}
+	//se desloca do angulo minimo para o angulo maximo
+	else if(adc_angulo >= max_ang){
+	  do{
+		  motor_esquerda(int_flag);
+		  adc_angulo = HAL_ADC_GetValue(&hadc);
+	  }while(adc_angulo >= min_ang);
+	}
 
     /* USER CODE END WHILE */
 
@@ -543,45 +538,33 @@ void motor_direita(uint16_t passo){
 	}
 }
 
-//função enviar variavel pela uart
-void uart_send_variable(uint16_t value){ //consertar: adicionando digitos incoerentes ao final ex:9500$
-	char uart_buffer[7];
-	itoa(value, (char *)uart_buffer, 10);
-	HAL_UART_Transmit(&huart1, (uint8_t *)uart_buffer, sizeof(uart_buffer), 100);
+//função para mudar a velocidade do motor
+void mudar_velocidade_motor(void){
+	int16_t temp = 0;
+	uint16_t temp_mult = 1;
+	uint32_t UART_Value = 0;
+	for (temp = UART_Counter -2; temp >= 0; temp--){
+		UART_Value = UART_Value + UART_STRING[temp] * temp_mult;
+		temp_mult = temp_mult*10;
+	}
+	prescal = UART_Value;
+	__HAL_TIM_SET_PRESCALER(&htim3,prescal); // ajustar prescaller do timer para alterar a velocidade
+	UART_Counter = 0;
+	HAL_UART_Transmit(&huart1, (uint8_t *)"speed: ", sizeof("speed: "), 100);
+	uart_send_variable((int)prescal);
+	HAL_UART_Transmit(&huart1, (uint8_t *)"\r\n", sizeof("\r\n"), 100);
 }
 
-//função converter variavel para enviar pela UART
-char* itoa(int num, char* buffer, int base)
-{
-	int current = 0;
-	if (num == 0) {
-		buffer[current++] = '0';
-		buffer[current] = '\0';
-		return buffer;
-	}
-	int num_digits = 0;
-	if (num < 0) {
-		if (base == 10) {
-			num_digits ++;
-			buffer[current] = '-';
-			current ++;
-			num *= -1;
-		}
-		else
-			return NULL;
-	}
-	num_digits += (int)floor(log(num) / log(base)) + 1;
-	while (current < num_digits)
-	{
-		int base_val = (int) pow(base, num_digits-1-current);
-		int num_val = num / base_val;
-		char value = num_val + '0';
-		buffer[current] = value;
-		current ++;
-		num -= base_val * num_val;
-	}
-	buffer[current] = '\0';
-	return buffer;
+//função enviar variavel pela uart
+void uart_send_variable(uint16_t value){ //consertar: adicionando digitos incoerentes ao final ex:9500$
+	char temp_buffer[12];
+	uint16_t i = 0, length = 0;
+	itoa(value, temp_buffer, 10);
+	//for como alternativa a sizeof(algum problema na contagem com sizeof)
+	for (i = 0; temp_buffer[i] != '\0' && temp_buffer[i] != '\n'; i++) {
+	    length++;
+	  }
+	HAL_UART_Transmit(&huart1, (uint8_t *)temp_buffer, length, 100);
 }
 
 // timer interrupt = controle da velocidade do motor
@@ -596,36 +579,14 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef* htim)
 // UART receive interrupt
 void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
 {
-	int16_t temp = 0;
-	uint16_t temp_mult = 1;
-	uint32_t UART_Value = 0;
 	HAL_UART_Transmit(&huart1, UART_buffer, sizeof(UART_buffer), 100);
 	UART_STRING[UART_Counter] = atoi((const char *)UART_buffer);
 	UART_Counter++;
 	if (UART_buffer[0] == '\r'){
 		HAL_UART_Transmit(&huart1, (uint8_t *)"\r\n", sizeof("\r\n"), 100);
-		for (temp = UART_Counter -2; temp >= 0; temp--){
-			UART_Value = UART_Value + UART_STRING[temp] * temp_mult;
-			temp_mult = temp_mult*10;
-		}
-		prescal = UART_Value;
-		__HAL_TIM_SET_PRESCALER(&htim3,prescal); // ajustar prescaller do timer para alterar a velocidade
-		UART_Counter = 0;
+		mudar_velocidade_motor();
+
 	}
-//	temp = atoi(UART_buffer); // ok!
-//	UART_STRING[UART_counter] = temp;
-//	UART_counter++;
-//	if (UART_buffer[0] == '\r'){
-//		UART_STRING[UART_counter] = 99;
-//		HAL_UART_Transmit(&huart1, "\r\n", sizeof("\r\n"), 100);
-//		UART_counter = 0;
-//		prescal = Atoi(UART_STRING);
-//		temp2 = prescal;
-//		__HAL_TIM_SET_PRESCALER(&htim3,prescal); // ajustar prescaller do timer para alterar a velocidade
-//	}
-//	if (UART_buffer[0] == '\r'){
-//		HAL_UART_Transmit(&huart1, "ok\r\n", sizeof("ok\r\n"), 100);
-//	}
     HAL_UART_Receive_IT(&huart1, UART_buffer, 1);
 
 }
